@@ -1,0 +1,19 @@
+services:
+  sre-mcp-server:
+    build: .
+    restart: unless-stopped
+    environment:
+      PAGERDUTY_TOKEN: ${PAGERDUTY_TOKEN}
+      GRAFANA_URL: ${GRAFANA_URL}
+      GRAFANA_TOKEN: ${GRAFANA_TOKEN}
+      GRAFANA_DATASOURCE_UID: ${GRAFANA_DATASOURCE_UID:-prometheus}
+      KUBECONFIG: /root/.kube/config
+      AWS_PROFILE: ${AWS_PROFILE:-default}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      RUNBOOK_DIR: /runbooks
+    volumes:
+      - ~/.kube:/root/.kube:ro
+      - ~/.aws:/root/.aws:ro
+      - ${RUNBOOK_DIR:-./runbooks}:/runbooks:ro
+    ports:
+      - "8080:8080"
