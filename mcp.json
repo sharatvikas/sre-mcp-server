@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json.schemastore.org/mcp.json",
+  "mcpServers": {
+    "sre-ops": {
+      "command": "uvx",
+      "args": ["--from", "sre-mcp-server", "sre-mcp-server"],
+      "env": {
+        "PAGERDUTY_API_KEY": "${PAGERDUTY_API_KEY}",
+        "GRAFANA_URL": "${GRAFANA_URL}",
+        "GRAFANA_TOKEN": "${GRAFANA_TOKEN}",
+        "KUBECONFIG": "${HOME}/.kube/config",
+        "RUNBOOKS_DIR": "${HOME}/runbooks",
+        "AWS_REGION": "us-east-1",
+        "AWS_PROFILE": "${AWS_PROFILE}"
+      }
+    }
+  }
+}
