@@ -13,6 +13,8 @@ from sre_mcp_server.tools.grafana import GrafanaTools
 from sre_mcp_server.tools.kubernetes import KubernetesTools
 from sre_mcp_server.tools.aws import AWSTools
 from sre_mcp_server.tools.runbooks import RunbookTools
+from sre_mcp_server.tools.oncall import OnCallToolHandler
+from sre_mcp_server.tools.capacity import CapacityToolHandler
 
 log = structlog.get_logger()
 
@@ -24,8 +26,10 @@ _grafana = GrafanaTools()
 _k8s = KubernetesTools()
 _aws = AWSTools()
 _runbooks = RunbookTools()
+_oncall = OnCallToolHandler()
+_capacity = CapacityToolHandler()
 
-_ALL_TOOLS = [_pd, _grafana, _k8s, _aws, _runbooks]
+_ALL_TOOLS = [_pd, _grafana, _k8s, _aws, _runbooks, _oncall, _capacity]
 
 
 @app.list_tools()
