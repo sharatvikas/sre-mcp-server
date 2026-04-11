@@ -1,0 +1,12 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: 'null'
+  routes:
+    - matchers:
+        - alertname = "Watchdog"
+      receiver: 'null'
+
+receivers:
+  - name: 'null'
