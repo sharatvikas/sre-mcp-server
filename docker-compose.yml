@@ -1,19 +1,96 @@
+##
+## Development + local-run environment for sre-mcp-server.
+##
+## Quick start:
+##   cp .env.example .env   # fill in your API keys
+##   docker compose up
+##
+## Services:
+##   mcp-server    — the MCP stdio server (pointed at Claude Desktop via mcp.json)
+##   prometheus    — local metrics backend for testing capacity/SLO tools
+##   alertmanager  — receives test alerts for verifying alert routing logic
+##   node-exporter — produces real host metrics for Prometheus to scrape
+##
+version: "3.9"
+
 services:
   sre-mcp-server:
-    build: .
+    build:
+      context: .
+      target: production
+    image: sre-mcp-server:dev
     restart: unless-stopped
     environment:
-      PAGERDUTY_TOKEN: ${PAGERDUTY_TOKEN}
-      GRAFANA_URL: ${GRAFANA_URL}
-      GRAFANA_TOKEN: ${GRAFANA_TOKEN}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?Set ANTHROPIC_API_KEY in .env}
+      PAGERDUTY_TOKEN: ${PAGERDUTY_TOKEN:-}
+      GRAFANA_URL: ${GRAFANA_URL:-http://prometheus:9090}
+      GRAFANA_TOKEN: ${GRAFANA_TOKEN:-}
       GRAFANA_DATASOURCE_UID: ${GRAFANA_DATASOURCE_UID:-prometheus}
       KUBECONFIG: /root/.kube/config
       AWS_PROFILE: ${AWS_PROFILE:-default}
       AWS_REGION: ${AWS_REGION:-us-east-1}
       RUNBOOK_DIR: /runbooks
+      RUNBOOK_INDEX_PATH: /runbooks/index.json
+      INCIDENT_INDEX_PATH: /runbooks/incidents.json
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
     volumes:
       - ~/.kube:/root/.kube:ro
       - ~/.aws:/root/.aws:ro
       - ${RUNBOOK_DIR:-./runbooks}:/runbooks:ro
+    stdin_open: true
+    networks:
+      - sre-net
+    depends_on:
+      prometheus:
+        condition: service_healthy
+
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+    volumes:
+      - ./dev/prometheus:/etc/prometheus:ro
+      - prometheus-data:/prometheus
     ports:
-      - "8080:8080"
+      - "9090:9090"
+    networks:
+      - sre-net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+    volumes:
+      - ./dev/alertmanager:/etc/alertmanager:ro
+      - alertmanager-data:/alertmanager
+    ports:
+      - "9093:9093"
+    networks:
+      - sre-net
+
+  node-exporter:
+    image: prom/node-exporter:v1.7.0
+    command:
+      - "--path.rootfs=/host"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+    ports:
+      - "9100:9100"
+    networks:
+      - sre-net
+
+networks:
+  sre-net:
+    driver: bridge
+
+volumes:
+  prometheus-data:
+  alertmanager-data:
