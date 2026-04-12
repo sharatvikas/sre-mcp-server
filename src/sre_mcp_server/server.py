@@ -6,7 +6,13 @@ import logging
 import structlog
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import Tool, TextContent
+from mcp.types import (
+    GetPromptResult,
+    Prompt,
+    Resource,
+    TextContent,
+    Tool,
+)
 
 from sre_mcp_server.tools.pagerduty import PagerDutyTools
 from sre_mcp_server.tools.grafana import GrafanaTools
@@ -16,6 +22,7 @@ from sre_mcp_server.tools.runbooks import RunbookTools
 from sre_mcp_server.tools.oncall import OnCallToolHandler
 from sre_mcp_server.tools.capacity import CapacityToolHandler
 from sre_mcp_server.tools.correlation import AlertCorrelationTools
+from sre_mcp_server.prompts.incident_rca import PROMPT_DEFINITIONS, get_prompt
 
 log = structlog.get_logger()
 
@@ -50,6 +57,19 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             result = await handler.call(name, arguments)
             return [TextContent(type="text", text=result)]
     raise ValueError(f"Unknown tool: {name}")
+
+
+@app.list_prompts()
+async def list_prompts() -> list[Prompt]:
+    """Expose structured incident response prompts to MCP clients."""
+    return PROMPT_DEFINITIONS
+
+
+@app.get_prompt()
+async def handle_get_prompt(name: str, arguments: dict | None) -> GetPromptResult:
+    """Return the prompt messages for the given prompt name."""
+    log.info("prompt_get", prompt=name, args=list((arguments or {}).keys()))
+    return get_prompt(name, arguments or {})
 
 
 def main() -> None:
