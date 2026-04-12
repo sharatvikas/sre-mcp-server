@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 
 import structlog
 from mcp.server import Server
@@ -25,6 +26,7 @@ from sre_mcp_server.tools.correlation import AlertCorrelationTools
 from sre_mcp_server.prompts.incident_rca import PROMPT_DEFINITIONS, get_prompt
 from sre_mcp_server.resources.error_budget import get_error_budget_resource, read_error_budget
 from sre_mcp_server.resources.capacity import get_capacity_resource, read_capacity
+from sre_mcp_server.resources.slo import get_slo_resource, list_slo_resources
 
 log = structlog.get_logger()
 
@@ -74,12 +76,20 @@ async def handle_get_prompt(name: str, arguments: dict | None) -> GetPromptResul
     return get_prompt(name, arguments or {})
 
 
+_SLO_SERVICES = [
+    s.strip()
+    for s in os.environ.get("SLO_SERVICES", "payments-api,checkout-api,auth-api").split(",")
+    if s.strip()
+]
+
+
 @app.list_resources()
 async def list_resources() -> list[Resource]:
     """Expose MCP resources that Claude can read for ambient context."""
     return [
         await get_error_budget_resource(),
         await get_capacity_resource(),
+        *list_slo_resources(_SLO_SERVICES),
     ]
 
 
@@ -87,6 +97,11 @@ async def list_resources() -> list[Resource]:
 async def read_resource(uri: str) -> str:
     """Return the content of the requested MCP resource."""
     log.info("resource_read", uri=uri)
+    if uri.startswith("sre://slos/"):
+        service = uri.removeprefix("sre://slos/")
+        if not service:
+            raise ValueError("Missing service name in SLO resource URI")
+        return await get_slo_resource(service)
     match uri:
         case "sre://error-budget/all":
             return await read_error_budget()
