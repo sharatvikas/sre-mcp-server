@@ -23,6 +23,8 @@ from sre_mcp_server.tools.oncall import OnCallToolHandler
 from sre_mcp_server.tools.capacity import CapacityToolHandler
 from sre_mcp_server.tools.correlation import AlertCorrelationTools
 from sre_mcp_server.prompts.incident_rca import PROMPT_DEFINITIONS, get_prompt
+from sre_mcp_server.resources.error_budget import get_error_budget_resource, read_error_budget
+from sre_mcp_server.resources.capacity import get_capacity_resource, read_capacity
 
 log = structlog.get_logger()
 
@@ -70,6 +72,28 @@ async def handle_get_prompt(name: str, arguments: dict | None) -> GetPromptResul
     """Return the prompt messages for the given prompt name."""
     log.info("prompt_get", prompt=name, args=list((arguments or {}).keys()))
     return get_prompt(name, arguments or {})
+
+
+@app.list_resources()
+async def list_resources() -> list[Resource]:
+    """Expose MCP resources that Claude can read for ambient context."""
+    return [
+        await get_error_budget_resource(),
+        await get_capacity_resource(),
+    ]
+
+
+@app.read_resource()
+async def read_resource(uri: str) -> str:
+    """Return the content of the requested MCP resource."""
+    log.info("resource_read", uri=uri)
+    match uri:
+        case "sre://error-budget/all":
+            return await read_error_budget()
+        case "sre://capacity/overview":
+            return await read_capacity()
+        case _:
+            raise ValueError(f"Unknown resource URI: {uri}")
 
 
 def main() -> None:
