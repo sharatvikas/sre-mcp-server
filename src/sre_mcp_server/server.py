@@ -15,6 +15,7 @@ from sre_mcp_server.tools.aws import AWSTools
 from sre_mcp_server.tools.runbooks import RunbookTools
 from sre_mcp_server.tools.oncall import OnCallToolHandler
 from sre_mcp_server.tools.capacity import CapacityToolHandler
+from sre_mcp_server.tools.correlation import AlertCorrelationTools
 
 log = structlog.get_logger()
 
@@ -28,8 +29,9 @@ _aws = AWSTools()
 _runbooks = RunbookTools()
 _oncall = OnCallToolHandler()
 _capacity = CapacityToolHandler()
+_correlation = AlertCorrelationTools()
 
-_ALL_TOOLS = [_pd, _grafana, _k8s, _aws, _runbooks, _oncall, _capacity]
+_ALL_TOOLS = [_pd, _grafana, _k8s, _aws, _runbooks, _oncall, _capacity, _correlation]
 
 
 @app.list_tools()
