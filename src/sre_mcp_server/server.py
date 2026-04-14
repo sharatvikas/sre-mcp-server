@@ -24,6 +24,7 @@ from sre_mcp_server.tools.oncall import OnCallToolHandler
 from sre_mcp_server.tools.capacity import CapacityToolHandler
 from sre_mcp_server.tools.correlation import AlertCorrelationTools
 from sre_mcp_server.tools.incidents import IncidentToolHandler
+from sre_mcp_server.tools.deployments import DeploymentToolHandler
 from sre_mcp_server.prompts.incident_rca import PROMPT_DEFINITIONS, get_prompt
 from sre_mcp_server.resources.error_budget import get_error_budget_resource, read_error_budget
 from sre_mcp_server.resources.capacity import get_capacity_resource, read_capacity
@@ -43,8 +44,9 @@ _oncall = OnCallToolHandler()
 _capacity = CapacityToolHandler()
 _correlation = AlertCorrelationTools()
 _incidents = IncidentToolHandler()
+_deployments = DeploymentToolHandler()
 
-_ALL_TOOLS = [_pd, _grafana, _k8s, _aws, _runbooks, _oncall, _capacity, _correlation, _incidents]
+_ALL_TOOLS = [_pd, _grafana, _k8s, _aws, _runbooks, _oncall, _capacity, _correlation, _incidents, _deployments]
 
 
 @app.list_tools()
