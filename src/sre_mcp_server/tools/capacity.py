@@ -15,10 +15,10 @@ from sre_mcp_server.tools.base import BaseToolHandler
 class CapacityToolHandler(BaseToolHandler):
     """AI-powered capacity planning using Prometheus metrics + Claude analysis."""
 
-    def handles(self, name: str) -> bool:
+    async def handles(self, name: str) -> bool:
         return name in {"analyze_capacity", "project_growth", "get_resource_headroom"}
 
-    def get_tools(self) -> list[Tool]:
+    async def get_tools(self) -> list[Tool]:
         return [
             Tool(
                 name="analyze_capacity",

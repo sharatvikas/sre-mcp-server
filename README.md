@@ -56,15 +56,41 @@ This is not a chatbot wrapper. It's a proper MCP server that exposes **Tools**, 
 | `search_runbooks` | Semantic search over runbook library |
 
 ### MCP Resources (Data the AI can read)
-- `sre://runbooks/{service}` — Service-specific runbooks
-- `sre://oncall/schedule` — Current on-call rotation
-- `sre://slos/{service}` — SLO burn rate and error budget status
-- `sre://topology/{service}` — Service dependency graph
+
+Read-only SRE state exposed as addressable resources. An MCP client can attach
+these at conversation start for ambient context — no tool round-trips needed.
+
+| URI | Content |
+|-----|---------|
+| `sre://incidents/active` | Open PagerDuty incidents (JSON): urgency, service, assignee, age |
+| `sre://oncall/schedule` | Current on-call rotation per escalation policy, sorted by level |
+| `sre://alerts/rules` | Grafana-managed alert rule catalog: titles, groups, labels, paused state |
+| `sre://cloudwatch/alarms` | CloudWatch alarms in ALARM state + most recently updated alarms |
+| `sre://error-budget/all` | SLO burn rates and error budget status across all services |
+| `sre://capacity/overview` | Cluster capacity, utilization, headroom, and rightsizing recommendations |
+| `sre://slos/{service}` | Per-service SLO burn rate report (services from `SLO_SERVICES` env) |
+
+Every resource returns valid JSON even when the upstream system is down — failures
+are reported in an `error` field instead of crashing the read, so the model always
+gets a parseable answer.
 
 ### MCP Prompts (Guided workflows)
-- `incident-triage` — Structured incident analysis prompt with auto-populated context
-- `slo-review` — Weekly SLO review with recommended actions
-- `capacity-planning` — Capacity forecast prompt with current utilization
+
+Reusable prompt templates that orchestrate the tools and resources above into
+repeatable SRE workflows:
+
+| Prompt | Arguments | What it does |
+|--------|-----------|--------------|
+| `incident_rca` | `incident_id`, `service`, `started_at`, `symptoms?` | Five-step root cause analysis: correlate alerts → deployment diff → K8s events → runbooks → hypothesis |
+| `incident-triage` | `service`, `alert_name` | Fast triage: live incidents, firing alerts, error-rate/latency PromQL, K8s events, on-call — then diagnosis + comms draft |
+| `postmortem_draft` | `incident_id`, `resolved_at?`, `impact?` | Blameless postmortem scaffolded from the real incident timeline and deployment history |
+| `explain_alert` | `alert_name`, `labels?`, `audience?` | Plain-language alert explanation grounded in the `sre://alerts/rules` catalog, live metrics, and runbooks; engineer or stakeholder tone |
+| `oncall_handoff` | `outgoing_engineer?`, `incoming_engineer?` | Shift handoff summary: active incidents, alert noise, recent deploys, error budgets |
+| `slo-review` | `service` | Weekly SLO review with burn-rate math and budget trajectory |
+| `capacity-check` | `namespace` | Namespace capacity health check with rightsizing recommendations |
+
+Required arguments are validated server-side — a missing argument fails fast with a
+clear error instead of rendering a half-filled template.
 
 ---
 
@@ -132,15 +158,24 @@ sre-mcp-server/
 │       │   ├── aws.py          # CloudWatch + AWS tools
 │       │   └── runbooks.py     # Runbook execution engine
 │       ├── resources/
-│       │   ├── runbooks.py     # Runbook resource providers
-│       │   └── topology.py     # Service dependency resources
-│       ├── prompts/
-│       │   └── workflows.py    # Guided SRE workflow prompts
-│       └── adapters/
-│           ├── pagerduty_client.py
-│           ├── grafana_client.py
-│           └── k8s_client.py
+│       │   ├── incidents.py    # sre://incidents/active (PagerDuty)
+│       │   ├── oncall.py       # sre://oncall/schedule (PagerDuty)
+│       │   ├── alert_rules.py  # sre://alerts/rules (Grafana)
+│       │   ├── cloudwatch.py   # sre://cloudwatch/alarms (AWS)
+│       │   ├── error_budget.py # sre://error-budget/all (Prometheus)
+│       │   ├── capacity.py     # sre://capacity/overview (Prometheus)
+│       │   └── slo.py          # sre://slos/{service} (Grafana)
+│       └── prompts/
+│           ├── registry.py     # Unified prompt catalog + dispatch + validation
+│           ├── incident_rca.py # RCA, postmortem, and handoff prompts
+│           ├── workflows.py    # Triage, SLO review, capacity check prompts
+│           └── alerts.py       # explain_alert prompt
 ├── tests/
+│   ├── conftest.py             # Env pinning so tests never touch real systems
+│   ├── test_server.py          # Registration + routing for tools/resources/prompts
+│   ├── test_tools.py           # Tool handlers with mocked PagerDuty/Grafana/AWS
+│   ├── test_resources.py       # Resource providers incl. upstream-failure paths
+│   └── test_prompts.py         # Prompt registry, interpolation, arg validation
 ├── docker-compose.yml
 ├── Dockerfile
 ├── pyproject.toml
@@ -158,12 +193,43 @@ sre-mcp-server/
 
 ---
 
+## Testing
+
+The test suite mocks every external client (PagerDuty, Grafana, AlertManager,
+CloudWatch via boto3, filesystem runbooks) — no credentials or network access
+required. HTTP traffic is intercepted with `pytest-httpx`; AWS calls are stubbed
+at the `boto3.Session` boundary.
+
+```bash
+pip install -e ".[dev]"
+pytest tests/ -v
+```
+
+Coverage focus:
+
+- **Registration invariants** — every tool has a unique name, a description, and a
+  valid input schema; every listed tool is claimed by exactly one handler; every
+  `required` schema field actually exists in `properties`.
+- **Routing** — `call_tool` dispatches to the owning handler, `read_resource`
+  routes each `sre://` URI (including pydantic `AnyUrl` inputs from the MCP SDK),
+  and unknown names raise cleanly.
+- **Handler logic** — response formatting, auth headers, empty-result paths.
+- **Failure modes** — HTTP 4xx/5xx, transport errors, and AWS `ClientError` all
+  degrade to structured error payloads instead of exceptions.
+- **Prompts** — argument interpolation, required-argument validation, and
+  audience-specific rendering.
+
+---
+
 ## Roadmap
 
 - [x] PagerDuty incident tools
 - [x] Grafana metrics tools
 - [x] Kubernetes pod/deployment tools
-- [ ] AWS CloudWatch alarms
+- [x] AWS CloudWatch alarms
+- [x] MCP Resources: incidents, on-call, alert rules, CloudWatch, SLO/error budget
+- [x] MCP Prompts: RCA, triage, postmortem, alert explanation, handoff, SLO review
+- [x] Test suite with mocked external clients
 - [ ] Runbook semantic search (embeddings)
 - [ ] Slack notification tool
 - [ ] JIRA incident ticket creation

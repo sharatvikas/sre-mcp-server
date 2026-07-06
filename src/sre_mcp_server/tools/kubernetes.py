@@ -22,7 +22,10 @@ def _load_k8s():
         k8s_config.load_kube_config()
 
 
-_load_k8s()
+try:
+    _load_k8s()
+except Exception:
+    pass  # Kubernetes tools will fail gracefully at call time if no cluster
 _core = k8s_client.CoreV1Api()
 _apps = k8s_client.AppsV1Api()
 

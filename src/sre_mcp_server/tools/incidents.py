@@ -1,7 +1,7 @@
 """Incident management and AlertManager MCP tools.
 
 Provides:
-- list_firing_alerts    — query AlertManager for currently firing alerts
+- list_alertmanager_alerts —  query AlertManager for currently firing alerts
 - silence_alert         — create an AlertManager silence
 - create_incident       — open a PagerDuty incident programmatically
 - get_incident_timeline — retrieve a PagerDuty incident + timeline
@@ -26,18 +26,18 @@ PAGERDUTY_FROM = os.environ.get("PAGERDUTY_FROM_EMAIL", "sre-bot@example.com")
 class IncidentToolHandler(BaseToolHandler):
     """Tools for incident management, alert silencing, and PagerDuty integration."""
 
-    def handles(self, name: str) -> bool:
+    async def handles(self, name: str) -> bool:
         return name in {
-            "list_firing_alerts",
+            "list_alertmanager_alerts",
             "silence_alert",
             "create_incident",
             "get_incident_timeline",
         }
 
-    def get_tools(self) -> list[Tool]:
+    async def get_tools(self) -> list[Tool]:
         return [
             Tool(
-                name="list_firing_alerts",
+                name="list_alertmanager_alerts",
                 description=(
                     "List all currently firing alerts from AlertManager. "
                     "Optionally filter by label (e.g. severity=critical, service=payments-api). "
@@ -154,8 +154,11 @@ class IncidentToolHandler(BaseToolHandler):
             ),
         ]
 
+    async def call(self, name: str, arguments: dict[str, Any]) -> str:
+        return await self.run_tool(name, arguments)
+
     async def run_tool(self, name: str, arguments: dict[str, Any]) -> str:
-        if name == "list_firing_alerts":
+        if name == "list_alertmanager_alerts":
             return await self._list_firing_alerts(arguments)
         if name == "silence_alert":
             return await self._silence_alert(arguments)

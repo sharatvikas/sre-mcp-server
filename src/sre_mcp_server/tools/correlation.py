@@ -50,14 +50,14 @@ _CAUSAL_PATTERNS: list[tuple[str, str]] = [
 class AlertCorrelationTools(BaseToolHandler):
     """Correlates active alerts to identify root causes and suppress noise."""
 
-    def handles(self, name: str) -> bool:
+    async def handles(self, name: str) -> bool:
         return name in {
             "correlate_alerts",
             "get_alert_storm_summary",
             "find_root_cause",
         }
 
-    def get_tools(self) -> list[Tool]:
+    async def get_tools(self) -> list[Tool]:
         return [
             Tool(
                 name="correlate_alerts",

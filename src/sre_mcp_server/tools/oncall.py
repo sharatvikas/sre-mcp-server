@@ -15,14 +15,14 @@ from sre_mcp_server.tools.base import BaseToolHandler
 class OnCallToolHandler(BaseToolHandler):
     """Tools for on-call shift management and escalation workflows."""
 
-    def handles(self, name: str) -> bool:
+    async def handles(self, name: str) -> bool:
         return name in {
             "get_current_oncall",
             "generate_shift_handoff",
             "get_escalation_policy",
         }
 
-    def get_tools(self) -> list[Tool]:
+    async def get_tools(self) -> list[Tool]:
         return [
             Tool(
                 name="get_current_oncall",

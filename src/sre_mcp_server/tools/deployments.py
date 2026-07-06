@@ -47,7 +47,7 @@ def _run_kubectl(*args: str, timeout: int = 30) -> tuple[str, str, int]:
 class DeploymentToolHandler(BaseToolHandler):
     """Tools for tracking and managing Kubernetes deployment rollouts."""
 
-    def handles(self, name: str) -> bool:
+    async def handles(self, name: str) -> bool:
         return name in {
             "get_rollout_status",
             "get_rollout_history",
@@ -56,7 +56,7 @@ class DeploymentToolHandler(BaseToolHandler):
             "compare_deployment_envs",
         }
 
-    def get_tools(self) -> list[Tool]:
+    async def get_tools(self) -> list[Tool]:
         return [
             Tool(
                 name="get_rollout_status",
@@ -155,6 +155,9 @@ class DeploymentToolHandler(BaseToolHandler):
                 },
             ),
         ]
+
+    async def call(self, name: str, arguments: dict[str, Any]) -> str:
+        return await self.handle(name, arguments)
 
     async def handle(self, name: str, arguments: dict[str, Any]) -> str:
         handlers = {

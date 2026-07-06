@@ -25,10 +25,30 @@ from sre_mcp_server.tools.capacity import CapacityToolHandler
 from sre_mcp_server.tools.correlation import AlertCorrelationTools
 from sre_mcp_server.tools.incidents import IncidentToolHandler
 from sre_mcp_server.tools.deployments import DeploymentToolHandler
-from sre_mcp_server.prompts.incident_rca import PROMPT_DEFINITIONS, get_prompt
+from sre_mcp_server.prompts.registry import ALL_PROMPTS, dispatch_prompt
 from sre_mcp_server.resources.error_budget import get_error_budget_resource, read_error_budget
 from sre_mcp_server.resources.capacity import get_capacity_resource, read_capacity
 from sre_mcp_server.resources.slo import get_slo_resource, list_slo_resources
+from sre_mcp_server.resources.incidents import (
+    INCIDENTS_RESOURCE_URI,
+    get_incidents_resource,
+    read_active_incidents,
+)
+from sre_mcp_server.resources.oncall import (
+    ONCALL_RESOURCE_URI,
+    get_oncall_resource,
+    read_oncall_schedule,
+)
+from sre_mcp_server.resources.alert_rules import (
+    ALERT_RULES_RESOURCE_URI,
+    get_alert_rules_resource,
+    read_alert_rules,
+)
+from sre_mcp_server.resources.cloudwatch import (
+    CLOUDWATCH_RESOURCE_URI,
+    get_cloudwatch_resource,
+    read_cloudwatch_alarms,
+)
 
 log = structlog.get_logger()
 
@@ -69,15 +89,15 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 
 @app.list_prompts()
 async def list_prompts() -> list[Prompt]:
-    """Expose structured incident response prompts to MCP clients."""
-    return PROMPT_DEFINITIONS
+    """Expose structured SRE workflow prompts to MCP clients."""
+    return ALL_PROMPTS
 
 
 @app.get_prompt()
 async def handle_get_prompt(name: str, arguments: dict | None) -> GetPromptResult:
     """Return the prompt messages for the given prompt name."""
     log.info("prompt_get", prompt=name, args=list((arguments or {}).keys()))
-    return get_prompt(name, arguments or {})
+    return dispatch_prompt(name, arguments or {})
 
 
 _SLO_SERVICES = [
@@ -93,13 +113,19 @@ async def list_resources() -> list[Resource]:
     return [
         await get_error_budget_resource(),
         await get_capacity_resource(),
+        get_incidents_resource(),
+        get_oncall_resource(),
+        get_alert_rules_resource(),
+        get_cloudwatch_resource(),
         *list_slo_resources(_SLO_SERVICES),
     ]
 
 
 @app.read_resource()
-async def read_resource(uri: str) -> str:
+async def read_resource(uri) -> str:
     """Return the content of the requested MCP resource."""
+    # The MCP SDK passes a pydantic AnyUrl — normalize to str for routing.
+    uri = str(uri)
     log.info("resource_read", uri=uri)
     if uri.startswith("sre://slos/"):
         service = uri.removeprefix("sre://slos/")
@@ -111,6 +137,14 @@ async def read_resource(uri: str) -> str:
             return await read_error_budget()
         case "sre://capacity/overview":
             return await read_capacity()
+        case x if x == INCIDENTS_RESOURCE_URI:
+            return await read_active_incidents()
+        case x if x == ONCALL_RESOURCE_URI:
+            return await read_oncall_schedule()
+        case x if x == ALERT_RULES_RESOURCE_URI:
+            return await read_alert_rules()
+        case x if x == CLOUDWATCH_RESOURCE_URI:
+            return await read_cloudwatch_alarms()
         case _:
             raise ValueError(f"Unknown resource URI: {uri}")
 

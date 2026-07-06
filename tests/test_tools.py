@@ -1,195 +1,254 @@
-"""Integration tests for SRE MCP server tools."""
+"""Tests for MCP tool handlers with mocked external clients."""
 
 from __future__ import annotations
 
-import asyncio
-import os
+import re
+from datetime import datetime, timedelta, timezone
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+
+from sre_mcp_server.tools.aws import AWSTools
+from sre_mcp_server.tools.grafana import GrafanaTools
+from sre_mcp_server.tools.pagerduty import PagerDutyTools
+from sre_mcp_server.tools.runbooks import RunbookTools
 
 
-# ── PagerDuty tool tests ────────────────────────────────────────────────────
+# ── PagerDuty ─────────────────────────────────────────────────────────────────
+
 
 class TestPagerDutyTools:
     @pytest.fixture
     def handler(self):
-        from sre_mcp_server.tools.pagerduty import PagerDutyToolHandler
-        return PagerDutyToolHandler()
+        return PagerDutyTools()
 
-    def test_handles_get_active_incidents(self, handler):
-        assert handler.handles("get_active_incidents")
+    async def test_handles_own_tools_only(self, handler):
+        assert await handler.handles("get_active_incidents")
+        assert await handler.handles("acknowledge_incident")
+        assert not await handler.handles("query_metrics")
 
-    def test_handles_acknowledge_incident(self, handler):
-        assert handler.handles("acknowledge_incident")
+    async def test_get_active_incidents_formats_output(self, handler, httpx_mock):
+        created = (datetime.now(timezone.utc) - timedelta(hours=2)).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        httpx_mock.add_response(
+            url=re.compile(r"https://api\.pagerduty\.com/incidents.*"),
+            json={
+                "incidents": [
+                    {
+                        "id": "P123",
+                        "title": "High error rate on payments-api",
+                        "status": "triggered",
+                        "urgency": "high",
+                        "service": {"summary": "payments-api"},
+                        "assignments": [{"assignee": {"summary": "Alice"}}],
+                        "created_at": created,
+                        "html_url": "https://pd.example.com/incidents/P123",
+                    }
+                ]
+            },
+        )
 
-    def test_does_not_handle_unknown(self, handler):
-        assert not handler.handles("unknown_tool")
+        result = await handler.call("get_active_incidents", {"limit": 5})
 
-    def test_tools_have_descriptions(self, handler):
-        tools = handler.get_tools()
-        for tool in tools:
-            assert tool.description, f"Tool {tool.name} has no description"
-            assert len(tool.description) > 10
-
-    @pytest.mark.asyncio
-    async def test_get_active_incidents_calls_api(self, handler):
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json = MagicMock(return_value={
-            "incidents": [
-                {
-                    "id": "P123",
-                    "title": "High error rate on payment-service",
-                    "status": "triggered",
-                    "urgency": "high",
-                    "service": {"summary": "payment-service"},
-                    "created_at": "2024-01-15T03:00:00Z",
-                    "html_url": "https://company.pagerduty.com/incidents/P123",
-                }
-            ]
-        })
-
-        with patch("httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=None)
-            mock_client.get = AsyncMock(return_value=mock_response)
-            mock_client_cls.return_value = mock_client
-
-            with patch.dict(os.environ, {"PAGERDUTY_API_KEY": "test-key"}):
-                result = await handler.call("get_active_incidents", {"limit": 5})
-
-        assert "payment-service" in result
         assert "P123" in result
+        assert "payments-api" in result
+        assert "Alice" in result
+
+    async def test_get_active_incidents_empty(self, handler, httpx_mock):
+        httpx_mock.add_response(
+            url=re.compile(r"https://api\.pagerduty\.com/incidents.*"),
+            json={"incidents": []},
+        )
+
+        result = await handler.call("get_active_incidents", {})
+
+        assert "No active incidents" in result
+
+    async def test_acknowledge_incident_sends_from_header(self, handler, httpx_mock):
+        httpx_mock.add_response(
+            method="PUT",
+            url="https://api.pagerduty.com/incidents/P123",
+            json={"incident": {"id": "P123", "status": "acknowledged"}},
+        )
+
+        result = await handler.call(
+            "acknowledge_incident",
+            {"incident_id": "P123", "from_email": "sre@example.com"},
+        )
+
+        request = httpx_mock.get_request()
+        assert request.headers["From"] == "sre@example.com"
+        assert "acknowledged" in result
+
+    async def test_unknown_tool_raises(self, handler):
+        with pytest.raises(ValueError, match="Unknown PagerDuty tool"):
+            await handler.call("not_a_tool", {})
 
 
-# ── Grafana tool tests ───────────────────────────────────────────────────────
+# ── Grafana ───────────────────────────────────────────────────────────────────
+
 
 class TestGrafanaTools:
     @pytest.fixture
     def handler(self):
-        from sre_mcp_server.tools.grafana import GrafanaToolHandler
-        return GrafanaToolHandler()
+        return GrafanaTools()
 
-    def test_all_tools_registered(self, handler):
-        tool_names = {t.name for t in handler.get_tools()}
-        assert "query_metrics" in tool_names
-        assert "list_firing_alerts" in tool_names
-        assert "get_dashboard_url" in tool_names
+    async def test_registered_tools(self, handler):
+        names = {t.name for t in await handler.get_tools()}
+        assert names == {"query_metrics", "get_dashboard_url", "list_firing_alerts"}
 
-    def test_query_metrics_has_required_params(self, handler):
-        tools = handler.get_tools()
-        query_tool = next(t for t in tools if t.name == "query_metrics")
-        schema = query_tool.inputSchema
-        assert "query" in schema.get("required", [])
+    async def test_query_metrics_requires_query_param(self, handler):
+        tool = next(
+            t for t in await handler.get_tools() if t.name == "query_metrics"
+        )
+        assert "query" in tool.inputSchema["required"]
 
-    @pytest.mark.asyncio
-    async def test_query_metrics_returns_formatted_table(self, handler):
-        mock_resp = MagicMock()
-        mock_resp.raise_for_status = MagicMock()
-        mock_resp.json = MagicMock(return_value={
-            "results": {
-                "A": {
-                    "frames": [{
-                        "schema": {"fields": [
-                            {"name": "Time"},
-                            {"name": "Value"},
-                        ]},
-                        "data": {"values": [
-                            [1705286400000],
-                            [42.7],
-                        ]}
-                    }]
+    async def test_query_metrics_formats_series(self, handler, httpx_mock):
+        httpx_mock.add_response(
+            url=re.compile(r"http://grafana\.test/api/datasources/proxy/.*"),
+            json={
+                "status": "success",
+                "data": {
+                    "result": [
+                        {
+                            "metric": {"__name__": "up", "job": "payments-api"},
+                            "values": [[1751700000, "1"]],
+                        }
+                    ]
+                },
+            },
+        )
+
+        result = await handler.call("query_metrics", {"query": "up"})
+
+        assert "up" in result
+        assert "payments-api" in result
+
+    async def test_query_metrics_no_data(self, handler, httpx_mock):
+        httpx_mock.add_response(
+            url=re.compile(r"http://grafana\.test/api/datasources/proxy/.*"),
+            json={"status": "success", "data": {"result": []}},
+        )
+
+        result = await handler.call("query_metrics", {"query": "missing_metric"})
+
+        assert "No data returned" in result
+
+    async def test_list_firing_alerts_filters_by_state(self, handler, httpx_mock):
+        httpx_mock.add_response(
+            url="http://grafana.test/api/alertmanager/grafana/api/v2/alerts",
+            json=[
+                {
+                    "status": {"state": "firing"},
+                    "labels": {"alertname": "HighErrorRate", "severity": "critical"},
+                    "annotations": {"summary": "Error rate above 1%"},
+                },
+                {
+                    "status": {"state": "normal"},
+                    "labels": {"alertname": "QuietAlert", "severity": "info"},
+                    "annotations": {},
+                },
+            ],
+        )
+
+        result = await handler.call("list_firing_alerts", {"state": "firing"})
+
+        assert "HighErrorRate" in result
+        assert "QuietAlert" not in result
+
+
+# ── AWS ───────────────────────────────────────────────────────────────────────
+
+
+class TestAWSTools:
+    @pytest.fixture
+    def handler(self):
+        return AWSTools()
+
+    async def test_get_cloudwatch_alarms_formats_output(self, handler):
+        mock_cw = MagicMock()
+        mock_cw.describe_alarms.return_value = {
+            "MetricAlarms": [
+                {
+                    "AlarmName": "rds-cpu-high",
+                    "StateValue": "ALARM",
+                    "StateReason": "Threshold crossed",
+                    "Namespace": "AWS/RDS",
+                    "MetricName": "CPUUtilization",
+                    "StateUpdatedTimestamp": "2026-07-05T12:00:00Z",
                 }
-            }
-        })
+            ]
+        }
+        mock_session = MagicMock()
+        mock_session.client.return_value = mock_cw
 
-        with patch("httpx.AsyncClient") as mock_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=None)
-            mock_client.post = AsyncMock(return_value=mock_resp)
-            mock_cls.return_value = mock_client
+        with patch("sre_mcp_server.tools.aws.boto3") as mock_boto3:
+            mock_boto3.Session.return_value = mock_session
+            result = await handler.call("get_cloudwatch_alarms", {"state": "ALARM"})
 
-            with patch.dict(os.environ, {
-                "GRAFANA_URL": "http://grafana.local",
-                "GRAFANA_TOKEN": "test-token",
-            }):
-                result = await handler.call("query_metrics", {
-                    "query": "up",
-                    "start": "now-1h",
-                    "end": "now",
-                })
+        mock_cw.describe_alarms.assert_called_once()
+        assert "rds-cpu-high" in result
+        assert "AWS/RDS/CPUUtilization" in result
 
-        assert result  # non-empty result
+    async def test_get_cloudwatch_alarms_empty(self, handler):
+        mock_cw = MagicMock()
+        mock_cw.describe_alarms.return_value = {"MetricAlarms": []}
+        mock_session = MagicMock()
+        mock_session.client.return_value = mock_cw
+
+        with patch("sre_mcp_server.tools.aws.boto3") as mock_boto3:
+            mock_boto3.Session.return_value = mock_session
+            result = await handler.call("get_cloudwatch_alarms", {})
+
+        assert "No alarms" in result
 
 
-# ── Runbooks tool tests ──────────────────────────────────────────────────────
+# ── Runbooks ──────────────────────────────────────────────────────────────────
+
 
 class TestRunbookTools:
     @pytest.fixture
-    def tmp_runbooks(self, tmp_path):
-        runbooks = tmp_path / "runbooks"
-        runbooks.mkdir()
-        (runbooks / "high-memory.md").write_text(
-            "# High Memory Runbook\n\n## Symptoms\nOOM kills on production pods.\n\n## Steps\n1. Check `kubectl top pods`"
+    def runbook_dir(self, tmp_path):
+        k8s = tmp_path / "k8s"
+        k8s.mkdir()
+        (k8s / "oomkill.md").write_text(
+            "# OOMKill Remediation\nSteps to diagnose container OOM kills.\n"
+            "\n## Steps\n1. kubectl top pods\n"
         )
-        (runbooks / "database-replication.md").write_text(
-            "# Database Replication Lag\n\n## Symptoms\nRDS replica is behind primary.\n\n## Steps\n1. Check `show slave status`"
+        (tmp_path / "database-failover.md").write_text(
+            "# Database Failover\nPromote the RDS replica during primary failure.\n"
         )
-        return runbooks
+        return tmp_path
 
     @pytest.fixture
-    def handler(self, tmp_runbooks, monkeypatch):
-        monkeypatch.setenv("RUNBOOKS_DIR", str(tmp_runbooks))
-        from sre_mcp_server.tools.runbooks import RunbookToolHandler
-        return RunbookToolHandler()
+    def handler(self, runbook_dir, monkeypatch):
+        monkeypatch.setenv("RUNBOOK_DIR", str(runbook_dir))
+        return RunbookTools()
 
-    @pytest.mark.asyncio
-    async def test_search_finds_keyword(self, handler):
-        result = await handler.call("search_runbooks", {"query": "memory"})
-        assert "high-memory" in result.lower() or "memory" in result.lower()
+    async def test_search_ranks_matches(self, handler):
+        result = await handler.call("search_runbooks", {"query": "OOM kills"})
+        assert "OOMKill Remediation" in result
 
-    @pytest.mark.asyncio
-    async def test_list_categories_returns_files(self, handler):
+    async def test_search_no_match(self, handler):
+        result = await handler.call("search_runbooks", {"query": "zzzznope"})
+        assert "No runbooks found" in result
+
+    async def test_get_runbook_by_stem(self, handler):
+        result = await handler.call("get_runbook", {"name": "oomkill"})
+        assert "kubectl top pods" in result
+
+    async def test_get_runbook_missing(self, handler):
+        result = await handler.call("get_runbook", {"name": "does-not-exist"})
+        assert "not found" in result
+
+    async def test_list_categories_counts(self, handler):
         result = await handler.call("list_runbook_categories", {})
-        assert "high-memory" in result or "database-replication" in result
+        assert "k8s: 1" in result
+        assert "general: 1" in result
 
-    @pytest.mark.asyncio
-    async def test_get_runbook_returns_content(self, handler):
-        result = await handler.call("get_runbook", {"name": "high-memory"})
-        assert "OOM" in result or "memory" in result.lower()
-
-
-# ── SLO Resource tests ───────────────────────────────────────────────────────
-
-class TestSLOResource:
-    @pytest.mark.asyncio
-    async def test_slo_resource_formats_output(self):
-        from sre_mcp_server.resources.slo import get_slo_status
-
-        mock_resp = MagicMock()
-        mock_resp.raise_for_status = MagicMock()
-        mock_resp.json = MagicMock(return_value={
-            "status": "success",
-            "data": {
-                "resultType": "vector",
-                "result": [{"metric": {}, "value": [1705286400, "0.42"]}]
-            }
-        })
-
-        with patch("httpx.AsyncClient") as mock_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=None)
-            mock_client.get = AsyncMock(return_value=mock_resp)
-            mock_cls.return_value = mock_client
-
-            with patch.dict(os.environ, {
-                "GRAFANA_URL": "http://grafana.local",
-                "GRAFANA_TOKEN": "test-token",
-            }):
-                result = await get_slo_status("payment-service")
-
-        assert result  # returned something
-        assert isinstance(result, str)
+    async def test_demo_mode_when_dir_missing(self, monkeypatch):
+        monkeypatch.setenv("RUNBOOK_DIR", "/nonexistent/runbooks")
+        handler = RunbookTools()
+        result = await handler.call("search_runbooks", {"query": "anything"})
+        assert "demo mode" in result
