@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import json
 from datetime import datetime, timezone, timedelta
 
 import httpx
@@ -192,7 +191,7 @@ class PagerDutyTools(BaseToolHandler):
             lines.append(f"\nDetails:\n{inc['body']['details']}")
 
         if logs:
-            lines.append(f"\nRECENT ACTIVITY")
+            lines.append("\nRECENT ACTIVITY")
             for entry in reversed(logs[-5:]):
                 lines.append(f"  [{entry['created_at']}] {entry['summary']}")
 

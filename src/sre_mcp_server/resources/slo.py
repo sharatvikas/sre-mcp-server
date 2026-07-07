@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import httpx
-from mcp.types import Resource, TextContent
+from mcp.types import Resource
 
 
 async def get_slo_resource(service: str) -> str:

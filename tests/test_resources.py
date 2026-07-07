@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import httpx
-import pytest
 from botocore.exceptions import ClientError
 
 from sre_mcp_server.resources import alert_rules, cloudwatch, incidents, oncall

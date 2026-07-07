@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import json
 import os
-import shlex
 import subprocess
 from datetime import datetime, timezone
 from typing import Any
@@ -224,7 +223,7 @@ class DeploymentToolHandler(BaseToolHandler):
         lines = stdout.splitlines()
         # kubectl output: REVISION  CHANGE-CAUSE — parse and limit
         header = lines[0] if lines else "REVISION  CHANGE-CAUSE"
-        data_lines = [l for l in lines[1:] if l.strip()]
+        data_lines = [line for line in lines[1:] if line.strip()]
         limited = data_lines[-limit:] if len(data_lines) > limit else data_lines
 
         return f"Rollout history for {deployment} (namespace: {ns}, last {len(limited)} revisions):\n{header}\n" + "\n".join(limited)
@@ -378,7 +377,7 @@ class DeploymentToolHandler(BaseToolHandler):
             for k in sorted(only_b):
                 lines.append(f"  + {k}={env_b[k]}")
         if differ:
-            lines.append(f"\nDifferent values:")
+            lines.append("\nDifferent values:")
             for k in sorted(differ):
                 lines.append(f"  ~ {k}")
                 lines.append(f"      {dep_a}: {env_a[k]}")

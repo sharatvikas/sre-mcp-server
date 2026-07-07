@@ -12,7 +12,7 @@ import os
 from typing import Any
 
 import httpx
-from mcp.types import Resource, TextContent
+from mcp.types import Resource
 
 
 GRAFANA_URL = os.environ.get("GRAFANA_URL", "http://localhost:3000")

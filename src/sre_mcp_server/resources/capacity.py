@@ -15,7 +15,7 @@ import os
 from typing import Any
 
 import httpx
-from mcp.types import Resource, TextContent
+from mcp.types import Resource
 
 PROMETHEUS_URL = os.environ.get("PROMETHEUS_URL", "http://localhost:9090")
 
