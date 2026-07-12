@@ -143,6 +143,18 @@ docker compose up -d
 
 ---
 
+## Try it locally
+
+One command boots the MCP server in-process and exercises its full surface — it enumerates every tool, resource, and prompt, performs **live reads** against a local Grafana/Prometheus stack, renders a prompt, and runs the PagerDuty/CloudWatch handlers with their network layer mocked (no credentials needed):
+
+```bash
+python demo/run_demo.py
+```
+
+This proves the server's tools, resources, and prompts all register and respond end-to-end. See [`demo/OUTPUT.md`](demo/OUTPUT.md) for a captured real run (with a line-by-line breakdown of what is live vs mocked) and [`demo/README.md`](demo/README.md) for prerequisites and configuration.
+
+---
+
 ## Project Structure
 
 ```
